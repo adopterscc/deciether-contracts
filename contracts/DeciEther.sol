@@ -52,7 +52,7 @@ contract DeciEther is Ownable {
   ** create a gig. unique id of gig is same as initial ipfs hash
   */
   function createGig(string ipfsHash, uint8 category, uint8 price, uint blocksToDeliver) {
-    require( gigs[ipfsHash].daysToDeliver == 0 ); // ensures there is no existing gig for corresponding gigHash
+    require( gigs[ipfsHash].blocksToDeliver == 0 ); // ensures there is no existing gig for corresponding gigHash
     Gig memory gig;
     gig.ipfsHash = ipfsHash;
     gig.category = category;
