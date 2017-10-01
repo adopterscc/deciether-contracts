@@ -118,7 +118,7 @@ contract DeciEther is Ownable {
 
   function sellerConfirmCompleted( string contractHash ) {
     require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) && ( contractMap[contractHash].acceptBlock > 0 ) );
-    u = msg.sender;
+    address u = msg.sender;
     u.transfer(contractMap[contractHash].amount);
     escrowedMap[contractHash] = escrowedMap[contractHash] - contractMap[contractHash].amount;
     contractMap[contractHash].deliverBlock == block.number;
