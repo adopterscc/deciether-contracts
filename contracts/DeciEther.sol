@@ -24,16 +24,17 @@ contract DeciEther is Ownable {
     string ipfsHash;
     uint8 category;
     uint price;
-    uint8 daysToDeliver;
+    uint blocksToDeliver;
     address owner;
     bool disabled;
   }
 
-  mapping( string => Gig ) gigs;
-  mapping( string => mapping( string => GigContract ) ) gigContractsMap;
-  mapping( string => string ) contractGigMap;
-  mapping( string => uint ) escrowedMap;
-  mapping( string => uint ) delayRejectedMap;
+  mapping( string => Gig ) gigs; // map gigHash to a gig
+  mapping( string => string[] ) gigContractsMap; // map a gig to all contracts ( as array of contractHash ) done for a gig
+  mapping( string => GigContract ) contractMap; // map contractHash to contract
+  mapping( string => uint ) escrowedMap;  // map of all amounts escrowed for a contract
+  mapping( address => uint ) delayNotAcceptedMap; // map of all contracts rejected by seller after delay
+  mapping( address => uint ) timelyNotDeliveredMap; // map of all contracts rejected by seller after delay
 
   struct GigContract {
     string gigHash;
@@ -41,19 +42,22 @@ contract DeciEther is Ownable {
     string contractIPFSHash;
     uint amount;
     uint feedbackStake;
-    uint executionBlock;
+    uint startBlock;
+    uint acceptBlock;
+    uint deliverBlock;
+    uint blocksToDeliver;
   }
 
   /*
   ** create a gig. unique id of gig is same as initial ipfs hash
   */
-  function createGig(string ipfsHash, uint8 category, uint8 price, uint8 daysToDeliver) {
+  function createGig(string ipfsHash, uint8 category, uint8 price, uint blocksToDeliver) {
     require( gigs[ipfsHash].daysToDeliver == 0 ); // ensures there is no existing gig for corresponding gigHash
     Gig memory gig;
     gig.ipfsHash = ipfsHash;
     gig.category = category;
     gig.price = price;
-    gig.daysToDeliver = daysToDeliver;
+    gig.blocksToDeliver = blocksToDeliver;
     gig.owner = msg.sender;
     gig.disabled = false;
     gigs[ipfsHash] = gig;
@@ -63,29 +67,30 @@ contract DeciEther is Ownable {
   /**
   ** update a gig. Diabling a gig should also the same method.
   **/
-  function updateGig(string gigHash, string ipfsHash, uint8 category, uint8 price, uint8 daysToDeliver, bool disabled) {
+  function updateGig(string gigHash, string ipfsHash, uint8 category, uint8 price, uint blocksToDeliver, bool disabled) {
     require( gigs[gigHash].owner == msg.sender ); // ensures owner is sender to update
     Gig memory gig;
     gig.ipfsHash = ipfsHash;
     gig.category = category;
     gig.price = price;
-    gig.daysToDeliver = daysToDeliver;
+    gig.blocksToDeliver = blocksToDeliver;
     gig.disabled = disabled;
     gigs[gigHash] = gig;
     onGigUpdated(gigHash);
   }
 
   function contractGig(string gigHash, string contractIPFSHash) {
-    require( ( gigContractsMap[gigHash][contractIPFSHash].price == 0 ) && ( msg.value >= gigs[gigHash].price + feedbackStakeWei ) ) ; // ensures no mapping exist for gigHash -> contractIPFSHash
+    require( ( contractMap[contractIPFSHash].price == 0 ) && ( msg.value >= gigs[gigHash].price + feedbackStakeWei ) ) ; // ensures no mapping exist for gigHash -> contractIPFSHash
     GigContract memory gContract;
     gContract.gigHash = gigHash;
     gContract.buyer = msg.sender;
     gContract.contractIPFSHash = contractIPFSHash;
-    gContract.amount = gigs[gigHash].price; // price when it was contracted since that can change later
-    gContract.executionBlock = block.number;
+    gContract.amount = msg.value - feedbackStakeWei; // in case seller wanted to pay more...
+    gContract.startBlock = block.number;
     gContract.feedbackStake = feedbackStakeWei; // should lock in case contract constant changes in future
-    gigContractsMap[gigHash][contractIPFSHash] = gContract;
-    contractGigMap[contractIPFSHash] = gigHash;
+    gContract.blocksToDeliver = gigs[gigHash].blocksToDeliver;
+    contractMap[contractIPFSHash] = gContract;
+    gigContractsMap[gigHash].push( contractIPFSHash );
     escrowedMap[contractIPFSHash] = msg.value;
     onContract(gigHash, contractIPFSHash);
   }
@@ -95,26 +100,50 @@ contract DeciEther is Ownable {
   ** Any rejected after that will show in rejected orders for seller.
   **/
   function sellerRejectContract( contractHash ) {
-    require( gigs[contractGigMap[contractHash]].owner == msg.sender );
+    require( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender );
     // return back money to buyer.
-    address u = gigContractsMap[contractGigMap[contractHash]][contractHash].buyer;
+    address u = contractMap[contractHash].buyer;
     u.transfer(escrowedMap[contractHash]);
     escrowedMap[contractHash] = 0;
-    if( block.number > gigContractsMap[contractGigMap[contractHash]][contractHash].executionBlock + can_honor_reject_blocks ) {
-      delayRejectedMap[msg.sender] = delayRejectedMap[msg.sender] + 1; // publicly available information 
+    if( block.number > contractMap[contractHash].startBlock + can_honor_reject_blocks ) {
+      delayNotAcceptedMap[msg.sender] = delayNotAcceptedMap[msg.sender] + 1; // publicly available information
+      contractMap[contractHash].deliverBlock = block.number;  // if delivered but not accepted means rejected
     }
   }
 
-  function sellerAcceptsContract() {
-
+  function sellerAcceptsContract( contractHash ) {
+    require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].acceptBlock == 0 ) );
+    contractMap[contractHash].acceptBlock = block.number;
   }
 
-  function sellerConfirmCompleted() {
-
+  function sellerConfirmCompleted( contractHash ) {
+    require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) && ( contractMap[contractHash].acceptBlock > 0 ) );
+    u = msg.sender;
+    u.transfer(contractMap[contractHash].amount);
+    escrowedMap[contractHash] = escrowedMap[contractHash] - contractMap[contractHash].amount;
+    contractMap[contractHash].deliverBlock == block.number;
   }
 
-  function buyerWithdrawOnContractFailure() {
-
+  function buyerWithdrawOnContractFailure( contractHash ) {
+    require( ( contractMap[contractHash].buyer == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) );
+    if( contractMap[contractHash].acceptBlock == 0 ) {
+      if( block.number > contractMap[contractHash].startBlock + can_honor_reject_blocks ) {
+        delayNotAcceptedMap[msg.sender] = delayNotAcceptedMap[msg.sender] + 1; // publicly available information
+        // return back money to buyer.
+        address u = contractMap[contractHash].buyer;
+        u.transfer(escrowedMap[contractHash]);
+        escrowedMap[contractHash] = 0;
+      }
+    } else {
+      // check for delivery date has passed
+      if( block.number > contractMap[contractHash].acceptBlock + contractMap[contractHash].blocksToDeliver ) {
+        timelyNotDeliveredMap[msg.sender] = timelyNotDeliveredMap[msg.sender] + 1; // publicly available information
+        // return back money to buyer.
+        address u = contractMap[contractHash].buyer;
+        u.transfer(escrowedMap[contractHash]);
+        escrowedMap[contractHash] = 0;
+      }
+    }
   }
 
   function sellerDeclareFailure() {
