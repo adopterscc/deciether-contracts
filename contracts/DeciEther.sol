@@ -80,7 +80,7 @@ contract DeciEther is Ownable {
   }
 
   function contractGig(string gigHash, string contractIPFSHash) {
-    require( ( contractMap[contractIPFSHash].price == 0 ) && ( msg.value >= gigs[gigHash].price + feedbackStakeWei ) ) ; // ensures no mapping exist for gigHash -> contractIPFSHash
+    require( ( contractMap[contractIPFSHash].amount == 0 ) && ( msg.value >= gigs[gigHash].price + feedbackStakeWei ) ) ; // ensures no mapping exist for gigHash -> contractIPFSHash
     GigContract memory gContract;
     gContract.gigHash = gigHash;
     gContract.buyer = msg.sender;
@@ -126,11 +126,12 @@ contract DeciEther is Ownable {
 
   function buyerWithdrawOnContractFailure( string contractHash ) {
     require( ( contractMap[contractHash].buyer == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) );
+    address u;
     if( contractMap[contractHash].acceptBlock == 0 ) {
       if( block.number > contractMap[contractHash].startBlock + can_honor_reject_blocks ) {
         delayNotAcceptedMap[msg.sender] = delayNotAcceptedMap[msg.sender] + 1; // publicly available information
         // return back money to buyer.
-        address u = contractMap[contractHash].buyer;
+        u = contractMap[contractHash].buyer;
         u.transfer(escrowedMap[contractHash]);
         escrowedMap[contractHash] = 0;
       }
@@ -139,7 +140,7 @@ contract DeciEther is Ownable {
       if( block.number > contractMap[contractHash].acceptBlock + contractMap[contractHash].blocksToDeliver ) {
         timelyNotDeliveredMap[msg.sender] = timelyNotDeliveredMap[msg.sender] + 1; // publicly available information
         // return back money to buyer.
-        address u = contractMap[contractHash].buyer;
+        u = contractMap[contractHash].buyer;
         u.transfer(escrowedMap[contractHash]);
         escrowedMap[contractHash] = 0;
       }
@@ -154,8 +155,8 @@ contract DeciEther is Ownable {
 
   }
 
-  function getGig(string hash) constant returns(string,uint8, uint8, uint8) {
-    return(gigs[hash].ipfsHash, gigs[hash].category, gigs[hash].price, gigs[hash].daysToDeliver);
+  function getGig(string hash) constant returns(string,uint8, uint, uint) {
+    return(gigs[hash].ipfsHash, gigs[hash].category, gigs[hash].price, gigs[hash].blocksToDeliver);
   }
 
   function getUserGigs() {
