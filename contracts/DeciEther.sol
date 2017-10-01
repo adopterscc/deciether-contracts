@@ -99,7 +99,7 @@ contract DeciEther is Ownable {
   ** Seller can reject contract in can_honor_reject_blocks without any reputation damage
   ** Any rejected after that will show in rejected orders for seller.
   **/
-  function sellerRejectContract( contractHash ) {
+  function sellerRejectContract( string contractHash ) {
     require( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender );
     // return back money to buyer.
     address u = contractMap[contractHash].buyer;
@@ -111,12 +111,12 @@ contract DeciEther is Ownable {
     }
   }
 
-  function sellerAcceptsContract( contractHash ) {
+  function sellerAcceptsContract( string contractHash ) {
     require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].acceptBlock == 0 ) );
     contractMap[contractHash].acceptBlock = block.number;
   }
 
-  function sellerConfirmCompleted( contractHash ) {
+  function sellerConfirmCompleted( string contractHash ) {
     require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) && ( contractMap[contractHash].acceptBlock > 0 ) );
     u = msg.sender;
     u.transfer(contractMap[contractHash].amount);
@@ -124,7 +124,7 @@ contract DeciEther is Ownable {
     contractMap[contractHash].deliverBlock == block.number;
   }
 
-  function buyerWithdrawOnContractFailure( contractHash ) {
+  function buyerWithdrawOnContractFailure( string contractHash ) {
     require( ( contractMap[contractHash].buyer == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) );
     if( contractMap[contractHash].acceptBlock == 0 ) {
       if( block.number > contractMap[contractHash].startBlock + can_honor_reject_blocks ) {
