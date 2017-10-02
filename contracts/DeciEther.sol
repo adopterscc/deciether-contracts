@@ -2,6 +2,8 @@ pragma solidity ^0.4.13;
 
 /*
 * TODO: Keep count of any extra ether or donations in the contract
+* TODO: check overflows
+* TODO: verify money leaks
 */
 import "./Ownable.sol";
 import './Strings.sol';
@@ -35,6 +37,7 @@ contract DeciEther is Ownable {
   mapping( string => uint ) escrowedMap;  // map of all amounts escrowed for a contract
   mapping( address => uint ) delayNotAcceptedMap; // map of all contracts rejected by seller after delay
   mapping( address => uint ) timelyNotDeliveredMap; // map of all contracts rejected by seller after delay
+  mapping( address => uint ) totalVouch;
 
   struct GigContract {
     string gigHash;
@@ -46,6 +49,9 @@ contract DeciEther is Ownable {
     uint acceptBlock;
     uint deliverBlock;
     uint blocksToDeliver;
+    uint8 contractStatus;
+    string feedbackHash;
+    uint vouch;
   }
 
   /*
@@ -89,6 +95,7 @@ contract DeciEther is Ownable {
     gContract.startBlock = block.number;
     gContract.feedbackStake = feedbackStakeWei; // should lock in case contract constant changes in future
     gContract.blocksToDeliver = gigs[gigHash].blocksToDeliver;
+    gContract.contractStatus = 11;
     contractMap[contractIPFSHash] = gContract;
     gigContractsMap[gigHash].push( contractIPFSHash );
     escrowedMap[contractIPFSHash] = msg.value;
@@ -100,11 +107,12 @@ contract DeciEther is Ownable {
   ** Any rejected after that will show in rejected orders for seller.
   **/
   function sellerRejectContract( string contractHash ) {
-    require( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender );
+    require( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender && contractMap[contractHash].contractStatus < 21 );
     // return back money to buyer.
     address u = contractMap[contractHash].buyer;
     u.transfer(escrowedMap[contractHash]);
     escrowedMap[contractHash] = 0;
+    contractMap[contractHash].contractStatus = 21;
     if( block.number > contractMap[contractHash].startBlock + can_honor_reject_blocks ) {
       delayNotAcceptedMap[msg.sender] = delayNotAcceptedMap[msg.sender] + 1; // publicly available information
       contractMap[contractHash].deliverBlock = block.number;  // if delivered but not accepted means rejected
@@ -112,16 +120,9 @@ contract DeciEther is Ownable {
   }
 
   function sellerAcceptsContract( string contractHash ) {
-    require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].acceptBlock == 0 ) );
+    require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].acceptBlock == 0 )  && contractMap[contractHash].contractStatus < 21 );
     contractMap[contractHash].acceptBlock = block.number;
-  }
-
-  function sellerConfirmCompleted( string contractHash ) {
-    require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) && ( contractMap[contractHash].acceptBlock > 0 ) );
-    address u = msg.sender;
-    u.transfer(contractMap[contractHash].amount);
-    escrowedMap[contractHash] = escrowedMap[contractHash] - contractMap[contractHash].amount;
-    contractMap[contractHash].deliverBlock == block.number;
+    contractMap[contractHash].contractStatus = 41;
   }
 
   function buyerWithdrawOnContractFailure( string contractHash ) {
@@ -130,6 +131,7 @@ contract DeciEther is Ownable {
     if( contractMap[contractHash].acceptBlock == 0 ) {
       if( block.number > contractMap[contractHash].startBlock + can_honor_reject_blocks ) {
         delayNotAcceptedMap[msg.sender] = delayNotAcceptedMap[msg.sender] + 1; // publicly available information
+        contractMap[contractHash].contractStatus = 31;
         // return back money to buyer.
         u = contractMap[contractHash].buyer;
         u.transfer(escrowedMap[contractHash]);
@@ -138,6 +140,7 @@ contract DeciEther is Ownable {
     } else {
       // check for delivery date has passed
       if( block.number > contractMap[contractHash].acceptBlock + contractMap[contractHash].blocksToDeliver ) {
+        contractMap[contractHash].contractStatus = 51;
         timelyNotDeliveredMap[msg.sender] = timelyNotDeliveredMap[msg.sender] + 1; // publicly available information
         // return back money to buyer.
         u = contractMap[contractHash].buyer;
@@ -147,12 +150,28 @@ contract DeciEther is Ownable {
     }
   }
 
-  function sellerDeclareFailure() {
-
+  function sellerConfirmCompleted( string contractHash ) {
+    require( ( gigs[ contractMap[contractHash].gigHash ].owner == msg.sender ) && ( contractMap[contractHash].deliverBlock == 0 ) && ( contractMap[contractHash].acceptBlock > 0 ) );
+    address u = msg.sender;
+    u.transfer(contractMap[contractHash].amount);
+    escrowedMap[contractHash] = escrowedMap[contractHash] - contractMap[contractHash].amount;
+    contractMap[contractHash].deliverBlock == block.number;
+    contractMap[contractHash].contractStatus = 61;
   }
 
-  function buyerProvideFeedback() {
-
+  function buyerProvideFeedback( string contractHash, string feedbackHash, uint vouch ) {
+    require( ( contractMap[contractHash].buyer == msg.sender ) && contractMap[contractHash].contractStatus > 61 && contractMap[contractHash].contractStatus < 71 ); // feedback will override
+    contractMap[contractHash].contractStatus = 71;
+    contractMap[contractHash].feedbackHash = feedbackHash;
+    address u = msg.sender;
+    u.transfer(escrowedMap[contractHash]);
+    escrowedMap[contractHash] = 0;
+    if( vouch> 0 ) {
+      address us = gigs[ contractMap[contractHash].gigHash ].owner;
+      us.transfer(vouch);
+      contractMap[contractHash].vouch = vouch;
+      totalVouch[us] = totalVouch[us] + vouch;
+    }
   }
 
   function getGig(string hash) constant returns(string,uint8, uint, uint) {
