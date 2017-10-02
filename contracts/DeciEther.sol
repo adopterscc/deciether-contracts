@@ -86,7 +86,7 @@ contract DeciEther is Ownable {
   }
 
   function contractGig(string gigHash, string contractIPFSHash) {
-    require( ( contractMap[contractIPFSHash].amount == 0 ) && ( msg.value >= gigs[gigHash].price + feedbackStakeWei ) ) ; // ensures no mapping exist for gigHash -> contractIPFSHash
+    require( ( contractMap[contractIPFSHash].contractStatus == 0 ) && ( msg.value >= gigs[gigHash].price + feedbackStakeWei ) ) ; // ensures no mapping exist for gigHash -> contractIPFSHash
     GigContract memory gContract;
     gContract.gigHash = gigHash;
     gContract.buyer = msg.sender;
@@ -176,6 +176,10 @@ contract DeciEther is Ownable {
 
   function getGig(string hash) constant returns(string,uint8, uint, uint) {
     return(gigs[hash].ipfsHash, gigs[hash].category, gigs[hash].price, gigs[hash].blocksToDeliver);
+  }
+
+  function getGigContract(string contractHash) constant returns(string) {
+    return(contractMap[contractHash].gigHash);
   }
 
   function getUserGigs() {
